@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .btn-primary {
+    @apply bg-blue-500 text-white font-bold py-2 px-4 rounded-lg transition-colors hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg transition-colors hover:bg-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed;
+  }
+
+  /* 兼容旧的 btn 样式，以防万一 */
+  .btn {
+    @apply bg-blue-500 text-white font-bold py-2 px-4 rounded-lg transition-colors hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed;
+  }
+}
