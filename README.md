@@ -1,37 +1,64 @@
-# AI图片融合工具（Next.js + Supabase）
+# AI Image Fusion Studio
 
-## 项目简介
-本项目是一个基于 Next.js 和 Supabase 的多步骤 AI 图像融合 Web 应用。支持用户登录、图片上传、AI 抠图、AI 生成背景、AI 融合、进度与错误提示、图片展示等。
+An advanced web application for seamlessly matting subjects from images and fusing them with AI-generated backgrounds, built with Next.js, Stability AI, and Supabase.
 
-## 主要依赖
-- Next.js 14+
-- Supabase
-- @supabase/auth-helpers-nextjs
-- next/image
-- ClipDrop API（抠图）
-- Stability AI API（背景生成）
+## Key Features
 
-## 目录结构
-- `app/page.js`：主页面组件
-- `app/api/matting/route.js`：抠图 API 路由
-- `app/api/ai-fuse/route.js`：AI 生成与融合 API 路由
-- 其他如 `layout.js`、`auth/callback/route.js` 用于全局布局和登录回调
+- **AI-Powered Matting**: Automatically removes the background from any uploaded image using the Stability AI API.
+- **Custom Aspect Ratios**: Choose from popular aspect ratios (`9:16`, `1:1`, `3:4`, `16:9`) to control the dimensions of the final image.
+- **Generative Backgrounds**: Dynamically generate high-quality backgrounds using Stability AI (SD3) based on text prompts and the selected aspect ratio.
+- **Seamless Image Fusion**: Intelligently composites the subject onto the new background, preserving scale and centering.
+- **Cloud Storage**: All generated images (matted subjects, backgrounds, final compositions) are stored and served via Supabase Storage.
+- **Modern Tech Stack**: Built with Next.js 14 App Router, styled with Tailwind CSS, and deployed with ease.
 
-## 快速开始
-```bash
-npm install
-cp .env.local.example .env.local
-npx next dev
-```
+## Technology Stack
 
-## 环境变量
-请在 `.env.local` 中配置以下内容：
-```
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-CLIPDROP_API_KEY=your_clipdrop_api_key
-STABILITY_API_KEY=your_stability_api_key
-```
+- **Framework**: [Next.js](https://nextjs.org/) 14
+- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
+- **Backend Image Processing**: [Sharp](https://sharp.pixelplumbing.com/)
+- **Database & Storage**: [Supabase](https://supabase.com/)
+- **AI Services**: [Stability AI API](https://platform.stability.ai/)
+  - *Image Matting*: `v2/stable-image/edit/remove-background`
+  - *Background Generation*: `v2beta/stable-image/generate/sd3`
 
-## 版权声明
-本项目仅供学习与个人研究使用，涉及的模型与 API 请遵守相关服务条款。
+## Getting Started
+
+Follow these steps to get the project running locally:
+
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/sourit2001/AIbg.git
+    cd AIbg
+    ```
+
+2.  **Install dependencies:**
+    ```bash
+    npm install
+    ```
+
+3.  **Set up environment variables:**
+    Create a new file named `.env.local` in the root of your project and add the following variables. You can get these keys from your Supabase and Stability AI dashboards.
+    ```env
+    NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_project_anon_key
+    SUPABASE_SERVICE_ROLE_KEY=your_supabase_project_service_role_key
+    STABILITY_API_KEY=your_stability_ai_api_key
+    ```
+
+4.  **Run the development server:**
+    ```bash
+    npm run dev
+    ```
+
+    Open [http://localhost:3000](http://localhost:3000) in your browser to see the application.
+
+## API Endpoints
+
+The application uses the following server-side API routes:
+
+- `POST /api/matting`: Handles the initial image upload and sends it to Stability AI for background removal.
+- `POST /api/ai-fuse`: A multi-purpose endpoint with two main `action` types:
+  - `generate-background`: Takes a prompt and aspect ratio to generate a new background.
+  - `fuse-image`: Takes the matted subject and a selected background to perform the final composition.
+
+
