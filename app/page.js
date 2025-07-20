@@ -69,7 +69,13 @@ export default function HomePage() {
 
   // 生成背景
   const handleGenerateBg = async () => {
-    if (step !== 2 || !mattingUrl || !bgPrompt || bgLoading) return;
+    // Allow generation on step 2 (initial) and step 3 (regenerate)
+    if ((step !== 2 && step !== 3) || !mattingUrl || !bgPrompt || bgLoading) return;
+
+    // If regenerating from step 3, go back to a loading state view
+    if (step === 3) {
+      setStep(2);
+    }
     
     setError("");
     setBgLoading(true);

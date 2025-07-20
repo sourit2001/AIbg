@@ -1,4 +1,39 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from 'next/server';
+
+/**
+ * Converts an RGB color value to HSL. Conversion formula
+ * adapted from http://en.wikipedia.org/wiki/HSL_color_space.
+ * Assumes r, g, and b are contained in the set [0, 255] and
+ * returns h, s, and l in the set [0, 1].
+ *
+ * @param   Number  r       The red color value
+ * @param   Number  g       The green color value
+ * @param   Number  b       The blue color value
+ * @return  Array           The HSL representation
+ */
+function rgbToHsl(r, g, b) {
+  r /= 255, g /= 255, b /= 255;
+
+  var max = Math.max(r, g, b), min = Math.min(r, g, b);
+  var h, s, l = (max + min) / 2;
+
+  if (max == min) {
+    h = s = 0; // achromatic
+  } else {
+    var d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
+    }
+
+    h /= 6;
+  }
+
+  return [ h, s, l ];
+}
 
 import { createClient } from '@supabase/supabase-js';
 import sharp from 'sharp';
@@ -114,22 +149,30 @@ export async function POST(req) {
         .png()
         .toBuffer();
 
-      // 直接将原始抠图（未经缩放）合成到调整好的背景上
-      const bgImage = sharp(resizedBackgroundBuffer);
+      // --- 颜色融合增强：使用柔光(soft-light)混合模式，模拟环境光 --- 
+      // 1. 获取背景图的主色调作为环境光颜色
+      const { dominant } = await sharp(resizedBackgroundBuffer).stats();
 
-      // --- 颜色融合增强：分析背景色调并应用到前景 ---
-      // 1. 获取背景图的主要颜色统计数据
-      const bgStats = await bgImage.stats();
-      // 从 most dominant color 中提取 R, G, B 值
-      const dominantColor = bgStats.dominant;
+      // 2. 创建一个半透明的、纯色的光照层
+      const lightLayer = await sharp({
+        create: {
+          width: finalWidth,
+          height: finalHeight,
+          channels: 4,
+          // 使用背景主色调，并设置较低的透明度以达到柔和效果
+          background: { r: dominant.r, g: dominant.g, b: dominant.b, alpha: 0.4 }, 
+        },
+      })
+      .png()
+      .toBuffer();
 
-      // 2. 将背景的主色调作为滤镜应用到抠图上，模拟环境光
+      // 3. 将光照层以 'soft-light' 模式叠加到抠图上，保留原图颜色和质感
       const colorCorrectedMattingBuffer = await sharp(mattingBuffer)
-        .tint(dominantColor)
+        .composite([{ input: lightLayer, blend: 'soft-light' }])
         .toBuffer();
 
-      // 3. 核心融合逻辑：将经过颜色校正的抠图叠加到背景上
-      const fusedBuffer = await bgImage
+      // 核心融合逻辑：将经过颜色校正的抠图叠加到背景上
+      const fusedBuffer = await sharp(resizedBackgroundBuffer)
         .composite([{ input: colorCorrectedMattingBuffer, top: 0, left: 0 }])
         .png()
         .toBuffer();
