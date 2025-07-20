@@ -71,9 +71,41 @@ export async function POST(req) {
         return NextResponse.json({ error: '缺少prompt或抠图URL参数' }, { status: 400 });
       }
 
-      // 自动优化提示词
-      const enhancedPrompt = `${prompt}, masterpiece, best quality, ultra-detailed, photorealistic, 8k, sharp focus`;
-      console.log(`Generating background with enhanced prompt: "${enhancedPrompt}"`);
+      // --- AI动态提示词增强逻辑 ---
+      // 根据用户要求，更新meta-prompt，强制要求LLM在扩写时，必须包含清晰度、光线和风格的描述
+      const metaPrompt = `As a prompt engineer for a text-to-image AI, expand the user's simple prompt into a rich, detailed, photorealistic scene. It is crucial to include specific keywords related to image clarity (e.g., '8k', 'ultra-detailed', 'sharp focus'), lighting (e.g., 'cinematic lighting', 'soft light', 'volumetric lighting'), and style (e.g., 'photorealistic', 'masterpiece', 'professional photography').
+
+User's simple prompt: "${prompt}"
+
+Your expanded, detailed prompt in English:`
+
+      // 使用 OpenRouter API 进行英文提示词扩写
+      const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+      console.log('OPENROUTER_API_KEY:', OPENROUTER_API_KEY); // 临时调试用，确认 token 是否被正确读取
+      const orResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemma-3n-e2b-it:free',
+          messages: [
+            { role: 'user', content: metaPrompt }
+          ],
+          max_tokens: 256,
+          temperature: 0.8
+        }),
+      });
+      const orData = await orResponse.json();
+      let enhancedPrompt = prompt; // 默认fallback
+      if (orData.choices && orData.choices[0] && orData.choices[0].message && orData.choices[0].message.content) {
+        enhancedPrompt = orData.choices[0].message.content.trim();
+        console.log('AI-Generated Enhanced Prompt:', enhancedPrompt);
+      } else {
+        console.error('OpenRouter prompt expansion failed:', orData);
+        return NextResponse.json({ error: orData?.error?.message || 'AI prompt generation failed' }, { status: 502 });
+      }
 
       // 从抠图URL获取图片尺寸
       const mattingResponse = await fetch(mattingUrl);
@@ -149,38 +181,28 @@ export async function POST(req) {
         .png()
         .toBuffer();
 
-      // --- 颜色融合增强：使用柔光(soft-light)混合模式，模拟环境光 --- 
-      // 1. 获取背景图的主色调作为环境光颜色
-      const { dominant } = await sharp(resizedBackgroundBuffer).stats();
+      // --- 高级颜色融合：使用高斯模糊的背景作为光源，并用原图作为遮罩 --- 
 
-      // 2. 创建一个半透明的、纯色的光照层
-      const lightLayer = await sharp({
-        create: {
-          width: finalWidth,
-          height: finalHeight,
-          channels: 4,
-          // 使用背景主色调，并设置较低的透明度以达到柔和效果
-          background: { r: dominant.r, g: dominant.g, b: dominant.b, alpha: 0.4 }, 
-        },
-      })
-      .png()
-      .toBuffer();
-
-      // 3. 将光照层以 'soft-light' 模式叠加到抠图上，保留原图颜色和质感
-      const colorCorrectedMattingBuffer = await sharp(mattingBuffer)
-        .composite([{ input: lightLayer, blend: 'soft-light' }])
+      // 1. 创建一个高斯模糊的背景图层，作为柔和的光源
+      const blurredBgLayer = await sharp(resizedBackgroundBuffer)
+        // .blur(15) // 根据用户要求，暂时取消高斯模糊，以保留背景细节
         .toBuffer();
 
-      // 核心融合逻辑：将经过颜色校正的抠图叠加到背景上
-      const fusedBuffer = await sharp(resizedBackgroundBuffer)
-        .composite([{ input: colorCorrectedMattingBuffer, top: 0, left: 0 }])
-        .png()
+      // 直接将抠图主体（mattingBuffer）按 alpha 遮罩叠加到背景，不做光影层叠加
+      const finalFusedBuffer = await sharp(resizedBackgroundBuffer)
+        .composite([
+          {
+            input: mattingBuffer,
+            blend: 'over' // 按 alpha 正常叠加
+          }
+        ])
         .toBuffer();
 
-      const fileName = `${uuidv4()}-fused.png`;
-      const fusedUrl = await uploadImageToSupabase(fusedBuffer, fileName);
-
+      // 直接返回最终融合的 buffer
+      const fusedUrl = await uploadImageToSupabase(finalFusedBuffer, `fused-${uuidv4()}.png`);
       return NextResponse.json({ fusedUrl });
+
+
     }
 
     return NextResponse.json({ error: "无效的操作" }, { status: 400 });
