@@ -12,7 +12,7 @@ export default function HomePage() {
   const [originalUrl, setOriginalUrl] = useState("");
   const [mattingUrl, setMattingUrl] = useState("");
   const [bgPrompt, setBgPrompt] = useState("");
-  const [selectedRatio, setSelectedRatio] = useState("9:16"); // 默认9:16
+
   const [bgCandidates, setBgCandidates] = useState([]);
   const [bgLoading, setBgLoading] = useState(false);
   const [selectedBg, setSelectedBg] = useState("");
@@ -80,7 +80,7 @@ export default function HomePage() {
       const res = await fetch("/api/ai-fuse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "generate-background", prompt: bgPrompt, mattingUrl, aspectRatio: selectedRatio }),
+        body: JSON.stringify({ action: "generate-background", prompt: bgPrompt, mattingUrl }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -109,7 +109,6 @@ export default function HomePage() {
           action: "fuse-image",
           mattingUrl,
           backgroundUrl: selectedBg,
-          aspectRatio: selectedRatio,
         }),
       });
       const data = await res.json();
@@ -179,7 +178,7 @@ export default function HomePage() {
         {/* Step 2: 抠图预览 + 生成背景 */}
         {step === 2 && (
           <div>
-            <h2 className="text-2xl font-bold mb-4">第二步：选择比例并描述背景</h2>
+            <h2 className="text-2xl font-bold mb-4">第二步：描述背景</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-6">
               <div className="text-center">
                 <h3 className="font-semibold mb-2">主体预览</h3>
@@ -188,25 +187,6 @@ export default function HomePage() {
                 </div>
               </div>
               <div>
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">选择输出比例</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { label: '竖屏 9:16', value: '9:16' },
-                      { label: '方形 1:1', value: '1:1' },
-                      { label: '竖向 3:4', value: '3:4' },
-                      { label: '横屏 16:9', value: '16:9' }
-                    ].map((ratio) => (
-                      <button
-                        key={ratio.value}
-                        type="button"
-                        onClick={() => setSelectedRatio(ratio.value)}
-                        className={`p-3 rounded-lg border-2 text-center transition-all ${selectedRatio === ratio.value ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                        <div className="font-semibold">{ratio.label}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">输入背景描述</label>
                   <textarea
@@ -222,7 +202,7 @@ export default function HomePage() {
                   onClick={handleGenerateBg} 
                   disabled={!bgPrompt || bgLoading}
                   className="btn-primary w-full mt-4 py-3">
-                  {bgLoading ? '正在生成...' : `生成 ${selectedRatio} 背景`}
+                  {bgLoading ? '正在生成...' : '生成背景'}
                 </button>
               </div>
             </div>

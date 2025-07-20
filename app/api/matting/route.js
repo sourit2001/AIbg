@@ -9,6 +9,27 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// 帮助函数：带重试逻辑的 fetch
+async function fetchWithRetry(url, options, retries = 3, delay = 1500) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      console.log(`Calling Stability AI, attempt ${i + 1}/${retries}...`);
+      const response = await fetch(url, options);
+      // 如果请求成功，或遇到客户端错误（如4xx），则直接返回，不再重试
+      if (response.ok || (response.status >= 400 && response.status < 500)) {
+        return response;
+      }
+      // 如果是服务器端错误 (5xx)，则等待后重试
+      console.warn(`Attempt ${i + 1} failed with server status: ${response.status}. Retrying in ${delay / 1000}s...`);
+    } catch (error) {
+      console.warn(`Attempt ${i + 1} failed with network error: ${error.message}. Retrying in ${delay / 1000}s...`);
+      if (i === retries - 1) throw error; // 最后一次尝试失败则抛出错误
+    }
+    await new Promise(res => setTimeout(res, delay));
+  }
+  throw new Error('All retry attempts failed.');
+}
+
 export async function POST(req) {
   try {
     const formData = await req.formData();
@@ -48,7 +69,7 @@ export async function POST(req) {
     const stabilityFormData = new FormData();
     stabilityFormData.append('image', new Blob([bufferForApi]), file.name);
 
-    const stabilityRes = await fetch('https://api.stability.ai/v2beta/stable-image/edit/remove-background', {
+    const stabilityRes = await fetchWithRetry('https://api.stability.ai/v2beta/stable-image/edit/remove-background', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.STABILITY_API_KEY}`,

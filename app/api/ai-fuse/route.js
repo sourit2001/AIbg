@@ -28,20 +28,37 @@ async function uploadImageToSupabase(buffer, fileName) {
 
 export async function POST(req) {
   try {
-    const { action, prompt, mattingUrl, backgroundUrl, aspectRatio } = await req.json();
+    const { action, prompt, mattingUrl, backgroundUrl } = await req.json();
 
     // --- Action 1: 生成背景图片 ---
     if (action === "generate-background") {
-      if (!prompt || !mattingUrl || !aspectRatio) {
-        return NextResponse.json({ error: '缺少prompt、抠图URL或比例参数' }, { status: 400 });
+      if (!prompt || !mattingUrl) {
+        return NextResponse.json({ error: '缺少prompt或抠图URL参数' }, { status: 400 });
       }
 
-      console.log(`Generating background with prompt: "${prompt}", ratio: ${aspectRatio}`);
+      // 自动优化提示词
+      const enhancedPrompt = `${prompt}, masterpiece, best quality, ultra-detailed, photorealistic, 8k, sharp focus`;
+      console.log(`Generating background with enhanced prompt: "${enhancedPrompt}"`);
+
+      // 从抠图URL获取图片尺寸
+      const mattingResponse = await fetch(mattingUrl);
+      if (!mattingResponse.ok) {
+        return NextResponse.json({ error: "无法下载抠图以获取尺寸" }, { status: 500 });
+      }
+      const mattingBuffer = Buffer.from(await mattingResponse.arrayBuffer());
+      const mattingMeta = await sharp(mattingBuffer).metadata();
+
+      // 将尺寸调整为64的倍数以符合API要求
+      const roundTo64 = (n) => Math.max(64, Math.round(n / 64) * 64);
+      const targetWidth = roundTo64(mattingMeta.width);
+      const targetHeight = roundTo64(mattingMeta.height);
+      console.log(`以原图比例为准，生成背景尺寸: ${targetWidth}x${targetHeight}`);
 
       const stabilityFormData = new FormData();
-      stabilityFormData.append('prompt', prompt);
-      stabilityFormData.append('output_format', 'png'); // 使用png保证质量
-      stabilityFormData.append('aspect_ratio', aspectRatio); // 直接使用用户选择的比例
+      stabilityFormData.append('prompt', enhancedPrompt);
+      stabilityFormData.append('output_format', 'png');
+      stabilityFormData.append('width', targetWidth);
+      stabilityFormData.append('height', targetHeight);
 
       const stabilityRes = await fetch('https://api.stability.ai/v2beta/stable-image/generate/sd3', {
         method: 'POST',
@@ -68,8 +85,8 @@ export async function POST(req) {
 
     // --- Action 2: 融合图片 (使用 Stability AI Inpainting) ---
     else if (action === "fuse-image") {
-      if (!mattingUrl || !backgroundUrl || !aspectRatio) {
-        return NextResponse.json({ error: "缺少抠图、背景图URL或比例参数" }, { status: 400 });
+      if (!mattingUrl || !backgroundUrl) {
+        return NextResponse.json({ error: "缺少抠图或背景图URL参数" }, { status: 400 });
       }
 
       // 下载背景图和抠图
@@ -85,72 +102,40 @@ export async function POST(req) {
       const backgroundBuffer = Buffer.from(await backgroundResponse.arrayBuffer());
       const mattingBuffer = Buffer.from(await mattingResponse.arrayBuffer());
 
-      // 计算用户选择比例的最终尺寸
-      const ratioMap = {
-        '9:16': { w: 9, h: 16 },
-        '1:1': { w: 1, h: 1 },
-        '3:4': { w: 3, h: 4 },
-        '16:9': { w: 16, h: 9 }
-      };
-      
-      const ratio = ratioMap[aspectRatio] || ratioMap['1:1'];
-      const baseSize = 1024;
-      let finalWidth, finalHeight;
-      
-      if (ratio.w >= ratio.h) {
-        finalWidth = baseSize;
-        finalHeight = Math.round(baseSize * ratio.h / ratio.w);
-      } else {
-        finalHeight = baseSize;
-        finalWidth = Math.round(baseSize * ratio.w / ratio.h);
-      }
-      
-      console.log(`融合目标尺寸: ${finalWidth}x${finalHeight} (${aspectRatio})`);
-      
-      // 获取抠图原始尺寸
+      // 获取抠图原始尺寸，以此作为最终图片的尺寸
       const mattingMeta = await sharp(mattingBuffer).metadata();
-      console.log(`抠图原始尺寸: ${mattingMeta.width}x${mattingMeta.height}`);
-      
-      // 计算抠图在新比例下的合适尺寸（保持主体大小合理）
-      const mattingScale = Math.min(
-        finalWidth / mattingMeta.width * 0.8,  // 留一些边距
-        finalHeight / mattingMeta.height * 0.8
-      );
-      const mattingNewWidth = Math.round(mattingMeta.width * mattingScale);
-      const mattingNewHeight = Math.round(mattingMeta.height * mattingScale);
-      
-      console.log(`抠图调整到: ${mattingNewWidth}x${mattingNewHeight}`);
-      
-      // 调整背景到目标尺寸
+      const finalWidth = mattingMeta.width;
+      const finalHeight = mattingMeta.height;
+      console.log(`融合目标尺寸将以原图为准: ${finalWidth}x${finalHeight}`);
+
+      // 将背景图调整为与抠图完全相同的尺寸，裁剪以填充
       const resizedBackgroundBuffer = await sharp(backgroundBuffer)
         .resize(finalWidth, finalHeight, { fit: 'cover', position: 'center' })
         .png()
         .toBuffer();
-      
-      // 调整抠图尺寸并转为PNG
-      const mattingPngBuffer = await sharp(mattingBuffer)
-        .resize(mattingNewWidth, mattingNewHeight, { fit: 'contain' })
-        .png()
+
+      // 直接将原始抠图（未经缩放）合成到调整好的背景上
+      const bgImage = sharp(resizedBackgroundBuffer);
+
+      // --- 颜色融合增强：分析背景色调并应用到前景 ---
+      // 1. 获取背景图的主要颜色统计数据
+      const bgStats = await bgImage.stats();
+      // 从 most dominant color 中提取 R, G, B 值
+      const dominantColor = bgStats.dominant;
+
+      // 2. 将背景的主色调作为滤镜应用到抠图上，模拟环境光
+      const colorCorrectedMattingBuffer = await sharp(mattingBuffer)
+        .tint(dominantColor)
         .toBuffer();
 
-      // 计算抠图在背景中的居中位置
-      const left = Math.round((finalWidth - mattingNewWidth) / 2);
-      const top = Math.round((finalHeight - mattingNewHeight) / 2);
-      
-      console.log(`抠图位置: left=${left}, top=${top}`);
-      
-      // 使用 sharp 将抠图合成到背景图上（居中放置）
-      const fusedImageBuffer = await sharp(resizedBackgroundBuffer)
-        .composite([{ 
-          input: mattingPngBuffer, 
-          left: left, 
-          top: top 
-        }])
+      // 3. 核心融合逻辑：将经过颜色校正的抠图叠加到背景上
+      const fusedBuffer = await bgImage
+        .composite([{ input: colorCorrectedMattingBuffer, top: 0, left: 0 }])
         .png()
         .toBuffer();
 
       const fileName = `${uuidv4()}-fused.png`;
-      const fusedUrl = await uploadImageToSupabase(fusedImageBuffer, fileName);
+      const fusedUrl = await uploadImageToSupabase(fusedBuffer, fileName);
 
       return NextResponse.json({ fusedUrl });
     }
