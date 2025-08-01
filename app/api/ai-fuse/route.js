@@ -121,32 +121,74 @@ Your expanded, detailed prompt in English:`
       const targetHeight = roundTo64(mattingMeta.height);
       console.log(`以原图比例为准，生成背景尺寸: ${targetWidth}x${targetHeight}`);
 
-      const stabilityFormData = new FormData();
-      stabilityFormData.append('prompt', enhancedPrompt);
-      stabilityFormData.append('output_format', 'png');
-      stabilityFormData.append('width', targetWidth);
-      stabilityFormData.append('height', targetHeight);
+      // PiAPI FLUX 最大支持 1024x1024，需自动缩放
+      const maxDim = 1024;
+      let scale = Math.min(maxDim / targetWidth, maxDim / targetHeight, 1);
+      let scaledWidth = roundTo64(Math.floor(targetWidth * scale));
+      let scaledHeight = roundTo64(Math.floor(targetHeight * scale));
+      console.log(`实际请求尺寸: ${scaledWidth}x${scaledHeight}`);
 
-      const stabilityRes = await fetch('https://api.stability.ai/v2beta/stable-image/generate/sd3', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.STABILITY_API_KEY}`,
-          'Accept': 'image/*',
-        },
-        body: stabilityFormData,
-      });
-
-      if (!stabilityRes.ok) {
-        const errorBody = await stabilityRes.text();
-        console.error('Stability AI background generation error:', errorBody);
-        return NextResponse.json({ error: '背景生成失败，请检查提示词或联系支持' }, { status: 500 });
+      // --- 背景生成逻辑 (piapi.ai FLUX txt2img) ---
+      const bgStartTime = Date.now();
+      const piapiApiKey = process.env.PIAPI_API_KEY;
+      if (!piapiApiKey) {
+        console.error('PIAPI_API_KEY not found in .env.local');
+        return NextResponse.json({ error: 'PiAPI API key not configured' }, { status: 500 });
       }
 
-      const bgBuffer = Buffer.from(await stabilityRes.arrayBuffer());
-      const bgFileName = `${uuidv4()}-background.png`;
-      const publicUrl = await uploadImageToSupabase(bgBuffer, bgFileName);
+      // 1. 提交生成任务
+      const createTaskRes = await fetch('https://api.piapi.ai/api/v1/task', {
+        method: 'POST',
+        headers: {
+          'X-API-Key': piapiApiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'Qubico/flux1-dev',
+          task_type: 'txt2img',
+          input: {
+            prompt: enhancedPrompt,
+            width: scaledWidth,
+            height: scaledHeight
+          }
+        })
+      });
+      if (!createTaskRes.ok) {
+        const err = await createTaskRes.text();
+        console.error('PiAPI create task failed:', err);
+        return NextResponse.json({ error: '背景生成任务提交失败: ' + err }, { status: 502 });
+      }
+      const taskData = await createTaskRes.json();
+      const taskId = taskData?.data?.task_id;
+      if (!taskId) {
+        return NextResponse.json({ error: '未获取到生成任务ID' }, { status: 502 });
+      }
 
-      // 返回单张高质量背景图
+      // 2. 轮询获取结果
+      let imageUrl = null;
+      for (let i = 0; i < 30; i++) { // 最多轮询30次
+        await new Promise(res => setTimeout(res, 2000)); // 每2秒轮询一次
+        const pollRes = await fetch(`https://api.piapi.ai/api/v1/task/${taskId}`, {
+          headers: { 'X-API-Key': piapiApiKey }
+        });
+        if (!pollRes.ok) continue;
+        const pollData = await pollRes.json();
+        if (pollData?.data?.status === 'completed' && pollData?.data?.output?.image_url) {
+          imageUrl = pollData.data.output.image_url;
+          break;
+        } else if (pollData?.data?.status === 'failed') {
+          return NextResponse.json({ error: '背景生成失败: ' + (pollData?.data?.error?.message || '未知错误') }, { status: 502 });
+        }
+      }
+      if (!imageUrl) {
+        return NextResponse.json({ error: '背景生成超时，请稍后重试' }, { status: 504 });
+      }
+
+      // 3. 下载图片并上传到 Supabase
+      const imgRes = await fetch(imageUrl);
+      const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+      const bgFileName = `${uuidv4()}-background.png`;
+      const publicUrl = await uploadImageToSupabase(imgBuffer, bgFileName);
       return NextResponse.json({ backgrounds: [publicUrl] });
     }
 
