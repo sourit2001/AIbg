@@ -131,6 +131,17 @@ export default function HomePage() {
     }
   };
 
+  // 下载图片
+  const handleDownload = () => {
+    if (!fusedUrl) return;
+    const link = document.createElement('a');
+    link.href = fusedUrl;
+    link.download = `fused-image-${new Date().getTime()}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // 重新开始
   const handleRestart = () => {
     setStep(1);
@@ -253,8 +264,9 @@ export default function HomePage() {
             <div className="inline-block shadow-lg rounded-lg overflow-hidden border">
               {fusedUrl && <img src={fusedUrl} alt="融合图片" className="max-w-full h-auto" style={{ maxWidth: '80vw', maxHeight: '70vh' }} />}
             </div>
-            <div className="mt-6">
-              <button type="button" onClick={handleRestart} className="btn-primary">再试一次</button>
+            <div className="mt-6 flex justify-center gap-4">
+              <button type="button" onClick={handleDownload} className="btn-primary">下载图片</button>
+              <button type="button" onClick={handleRestart} className="btn-secondary">再试一次</button>
             </div>
           </div>
         )}
